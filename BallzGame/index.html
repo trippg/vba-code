@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Ballz</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#111118; overflow:hidden; }
+canvas { display:block; touch-action:none; -webkit-user-select:none; user-select:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+const cvs = document.getElementById('c');
+const ctx = cvs.getContext('2d');
+
+// ── Constants ────────────────────────────────────────────────────
+const COLS    = 7;
+const PAD     = 4;
+const BR      = 10;     // ball radius
+const SPD     = 13;     // ball speed px/frame at 60fps
+const MAX_ROW = 10;     // rows before game over
+const SHIFT_S = 0.28;   // shift animation duration (seconds)
+
+// ── Layout (recalculated on resize) ─────────────────────────────
+let W, H, BW, BH, PR, fy, cy;
+// fy = floor Y (bottom of play area), cy = ceiling Y (top)
+// BW = brick width, BH = brick height, PR = power-up radius
+
+function layout() {
+    W  = cvs.width  = window.innerWidth;
+    H  = cvs.height = window.innerHeight;
+    fy = H * 0.90;
+    cy = H * 0.10;
+    BH = Math.floor((fy - cy - PAD * (MAX_ROW + 1)) / MAX_ROW);
+    BW = Math.floor((W  - PAD * (COLS + 1)) / COLS);
+    PR = Math.min(BH / 2 - 5, 20);
+}
+layout();
+window.addEventListener('resize', layout);
+
+// ── Grid helpers ─────────────────────────────────────────────────
+const colX = c => PAD + c * (BW + PAD) + BW / 2;
+const rowY = r => cy + PAD + BH / 2 + r * (BH + PAD);
+
+// ── Utilities ────────────────────────────────────────────────────
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = t => t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
+
+function randInt(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }
+
+function unusedCol(used) {
+    let c;
+    do { c = randInt(0, COLS - 1); } while (used.has(c));
+    used.add(c);
+    return c;
+}
+
+function hexRGB(h) {
+    return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+}
+function blendColor(c1, c2, t) {
+    const [r1,g1,b1] = hexRGB(c1), [r2,g2,b2] = hexRGB(c2);
+    return `rgb(${lerp(r1,r2,t)|0},${lerp(g1,g2,t)|0},${lerp(b1,b2,t)|0})`;
+}
+function brickColor(hp, refHP) {
+    const t = Math.min(hp / Math.max(refHP, 1), 1);
+    if (t < 0.34) return '#2ec854';
+    if (t < 0.67) return '#f0971a';
+    return '#e83535';
+}
+
+function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y,   x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y+h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h,   x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y,       x + r, y);
+    ctx.closePath();
+}
+
+// ── State ────────────────────────────────────────────────────────
+let gs;          // 'wait' | 'aim' | 'shoot' | 'over'
+let ballCount, level, topHP;
+let balls, bricks, pups;
+let shot, homed, firstRet, retX;
+let lVX, lVY;
+let aimPt;
+let shifting, shiftProg, brickPreY, pupPreY;
+
+function init() {
+    gs        = 'wait';
+    ballCount = 1;
+    level     = 1;
+    topHP     = 4;
+    balls     = [];
+    bricks    = [];
+    pups      = [];
+    shot = homed = 0;
+    firstRet  = false;
+    retX      = W / 2;
+    aimPt     = null;
+    shifting  = false;
+    spawnRow(false);
+}
+
+// ── Spawn a new brick row ────────────────────────────────────────
+function spawnRow(doShift) {
+    if (doShift) {
+        brickPreY = bricks.map(b => b.y);
+        pupPreY   = pups.map(p => p.y);
+        bricks.forEach(b => b.row++);
+        pups.forEach(p   => p.row++);
+        if (bricks.some(b => b.row >= MAX_ROW)) { gs = 'over'; return; }
+    } else {
+        brickPreY = [];
+        pupPreY   = [];
+    }
+
+    const minHP  = Math.max(1, level);
+    const maxHP  = level + 3;
+    topHP        = Math.max(topHP, maxHP);
+    const nBricks= randInt(3, Math.min(COLS - 1, 3 + (level / 4 | 0)));
+    const used   = new Set();
+
+    for (let i = 0; i < nBricks; i++) {
+        const col = unusedCol(used);
+        bricks.push({ col, row: 0, x: colX(col), y: rowY(0), hp: randInt(minHP, maxHP), flash: 0 });
+        if (doShift) brickPreY.push(rowY(0));
+    }
+    if (Math.random() < 0.67) {
+        const col = unusedCol(used);
+        pups.push({ col, row: 0, x: colX(col), y: rowY(0) });
+        if (doShift) pupPreY.push(rowY(0));
+    }
+
+    if (doShift) {
+        shifting  = true;
+        shiftProg = 0;
+    } else {
+        bricks.forEach(b => { b.y = rowY(b.row); });
+        pups.forEach(p   => { p.y = rowY(p.row); });
+    }
+    gs = 'wait';
+}
+
+// ── Ball firing ───────────────────────────────────────────────────
+function beginRound(vx, vy) {
+    gs       = 'shoot';
+    lVX = vx; lVY = vy;
+    shot     = ballCount;
+    homed    = 0;
+    firstRet = false;
+    balls    = [];
+    for (let i = 0; i < shot; i++) {
+        setTimeout(() => {
+            balls.push({ x: retX, y: fy - BR - 4, vx: lVX, vy: lVY, done: false, returning: false, rt: 0, rx: 0, ry: 0, tx: 0, ty: 0 });
+        }, i * 115);
+    }
+}
+
+// ── Circle–AABB collision ─────────────────────────────────────────
+function collideBrick(ball, brick) {
+    const bx = brick.x - BW / 2, by = brick.y - BH / 2;
+    const cx2 = Math.max(bx, Math.min(ball.x, bx + BW));
+    const cy2 = Math.max(by, Math.min(ball.y, by + BH));
+    const dx = ball.x - cx2, dy = ball.y - cy2;
+    const d2 = dx * dx + dy * dy;
+    if (d2 === 0 || d2 >= BR * BR) return false;
+    const d  = Math.sqrt(d2);
+    const ex = dx / d, ey = dy / d;
+    const dot = ball.vx * ex + ball.vy * ey;
+    ball.vx -= 2 * dot * ex;
+    ball.vy -= 2 * dot * ey;
+    ball.x   = cx2 + ex * (BR + 1);
+    ball.y   = cy2 + ey * (BR + 1);
+    return true;
+}
+
+function collidePup(ball, pup) {
+    const dx = ball.x - pup.x, dy = ball.y - pup.y;
+    return dx * dx + dy * dy < (BR + PR) * (BR + PR);
+}
+
+// ── Return a ball to the floor ────────────────────────────────────
+function returnBall(ball) {
+    ball.done = true;
+    if (!firstRet) { firstRet = true; retX = ball.x; }
+    ball.rx = ball.x; ball.ry = ball.y;
+    ball.tx = retX;   ball.ty = fy - BR - 4;
+    ball.rt = 0;
+    ball.returning = true;
+}
+
+function endRound() {
+    balls = [];
+    level++;
+    spawnRow(true);
+}
+
+// ── Update ────────────────────────────────────────────────────────
+const STEPS = 3;
+let last = 0;
+
+function update(ts) {
+    const dt = Math.min((ts - last) / 1000, 0.05);
+    last = ts;
+
+    // Shift animation
+    if (shifting) {
+        shiftProg = Math.min(shiftProg + dt / SHIFT_S, 1);
+        const t = ease(shiftProg);
+        bricks.forEach((b, i) => { if (brickPreY[i] !== undefined) b.y = lerp(brickPreY[i], rowY(b.row), t); });
+        pups.forEach((p, i)   => { if (pupPreY[i]   !== undefined) p.y = lerp(pupPreY[i],   rowY(p.row), t); });
+        if (shiftProg >= 1) shifting = false;
+    }
+
+    // Flash decay on bricks
+    bricks.forEach(b => { if (b.flash > 0) b.flash = Math.max(0, b.flash - dt * 5); });
+
+    if (gs !== 'shoot') return;
+
+    const sdt = dt / STEPS;
+    for (const ball of balls) {
+        if (ball.done) {
+            if (!ball.returning) continue;
+            ball.rt = Math.min(ball.rt + dt / 0.18, 1);
+            ball.x  = lerp(ball.rx, ball.tx, ease(ball.rt));
+            ball.y  = lerp(ball.ry, ball.ty, ease(ball.rt));
+            if (ball.rt >= 1) {
+                ball.returning = false;
+                homed++;
+                if (homed >= shot) endRound();
+            }
+            continue;
+        }
+
+        for (let s = 0; s < STEPS; s++) {
+            ball.x += ball.vx * SPD * sdt * 60;
+            ball.y += ball.vy * SPD * sdt * 60;
+
+            // Wall bounces
+            if (ball.x - BR < 0)  { ball.x = BR;     ball.vx =  Math.abs(ball.vx); }
+            if (ball.x + BR > W)  { ball.x = W - BR; ball.vx = -Math.abs(ball.vx); }
+            if (ball.y - BR < cy) { ball.y = cy + BR; ball.vy =  Math.abs(ball.vy); } // ceiling
+
+            // Floor → return
+            if (ball.y + BR > fy) { ball.y = fy - BR; returnBall(ball); break; }
+
+            // Brick collisions
+            for (let i = bricks.length - 1; i >= 0; i--) {
+                if (collideBrick(ball, bricks[i])) {
+                    bricks[i].hp--;
+                    bricks[i].flash = 1;
+                    if (bricks[i].hp <= 0) bricks.splice(i, 1);
+                    break;
+                }
+            }
+
+            // Power-up collisions
+            for (let i = pups.length - 1; i >= 0; i--) {
+                if (collidePup(ball, pups[i])) {
+                    pups.splice(i, 1);
+                    ballCount++;
+                }
+            }
+        }
+    }
+}
+
+// ── Draw ──────────────────────────────────────────────────────────
+function draw() {
+    // Background
+    ctx.fillStyle = '#111118';
+    ctx.fillRect(0, 0, W, H);
+
+    // Floor line
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(0, fy - 1, W, 2);
+
+    // Bricks
+    for (const b of bricks) {
+        const x = b.x - BW / 2 + 2, y = b.y - BH / 2 + 2;
+        const w = BW - 4, h = BH - 4;
+        const base = brickColor(b.hp, topHP);
+        ctx.fillStyle = b.flash > 0 ? blendColor(base, '#ffffff', b.flash * 0.75) : base;
+        roundRect(x, y, w, h, 6);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        roundRect(x, y, w, h, 6);
+        ctx.stroke();
+
+        ctx.fillStyle = 'white';
+        ctx.font      = `bold ${b.hp < 10 ? 17 : b.hp < 100 ? 14 : 11}px -apple-system,sans-serif`;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(b.hp, b.x, b.y);
+    }
+
+    // Power-ups
+    for (const p of pups) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, PR, 0, Math.PI * 2);
+        ctx.fillStyle = '#1de068';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle    = 'white';
+        ctx.font         = `bold 12px -apple-system,sans-serif`;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('+●', p.x, p.y);
+    }
+
+    // Aim guide
+    if ((gs === 'aim' || gs === 'wait') && aimPt) {
+        const lx = retX, ly = fy - BR - 4;
+        const dx = aimPt.x - lx, dy = aimPt.y - ly;
+        if (dy < -20) {
+            const len = Math.sqrt(dx * dx + dy * dy);
+            const nx = dx / len, ny = dy / len;
+            for (let i = 1; i <= 25; i++) {
+                const px = lx + nx * i * 17;
+                const py = ly + ny * i * 17;
+                if (px < 4 || px > W - 4 || py < cy) break;
+                ctx.beginPath();
+                ctx.arc(px, py, 3, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,255,255,${(26 - i) / 27})`;
+                ctx.fill();
+            }
+        }
+    }
+
+    // Ball indicator (shows launch position when not shooting)
+    if (gs === 'wait' || gs === 'aim') {
+        ctx.beginPath();
+        ctx.arc(retX, fy - BR - 4, BR, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffd930';
+        ctx.fill();
+    }
+
+    // Active balls
+    for (const ball of balls) {
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, BR, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffd930';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+        ctx.lineWidth   = 1;
+        ctx.stroke();
+    }
+
+    // HUD — level
+    ctx.fillStyle    = 'rgba(255,255,255,0.88)';
+    ctx.font         = `bold 18px -apple-system,sans-serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('LEVEL ' + level, W / 2, cy - 6);
+
+    // HUD — ball count
+    ctx.fillStyle    = '#ffd930';
+    ctx.font         = `bold 16px -apple-system,sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.fillText('× ' + ballCount, W / 2, fy + 10);
+
+    // Game over overlay
+    if (gs === 'over') {
+        ctx.fillStyle = 'rgba(0,0,0,0.80)';
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.textAlign = 'center';
+
+        ctx.fillStyle    = 'white';
+        ctx.font         = `bold 46px -apple-system,sans-serif`;
+        ctx.textBaseline = 'middle';
+        ctx.fillText('GAME OVER', W / 2, H / 2 - 52);
+
+        ctx.fillStyle = '#ffd930';
+        ctx.font      = `bold 22px -apple-system,sans-serif`;
+        ctx.fillText('Level ' + level + '  ·  ' + ballCount + ' balls', W / 2, H / 2 + 5);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font      = `bold 18px -apple-system,sans-serif`;
+        ctx.fillText('Tap to play again', W / 2, H / 2 + 58);
+    }
+}
+
+// ── Touch / Mouse input ───────────────────────────────────────────
+function getPos(e, touch) {
+    const src  = touch ? e.changedTouches[0] : e;
+    const rect = cvs.getBoundingClientRect();
+    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+}
+
+function onDown(p) {
+    if (gs === 'over')  { init(); return; }
+    if (gs === 'wait' && !shifting && p.y < fy - 50) {
+        gs = 'aim'; aimPt = p;
+    }
+}
+function onMove(p) {
+    if (gs === 'aim') aimPt = p;
+}
+function onUp(p) {
+    if (gs !== 'aim') return;
+    aimPt = null;
+    const dx = p.x - retX;
+    const dy = p.y - (fy - BR - 4);
+    if (dy >= -20) { gs = 'wait'; return; }
+    const len = Math.sqrt(dx * dx + dy * dy);
+    beginRound(dx / len, dy / len);
+}
+
+cvs.addEventListener('touchstart', e => { e.preventDefault(); onDown(getPos(e, true)); },  { passive: false });
+cvs.addEventListener('touchmove',  e => { e.preventDefault(); onMove(getPos(e, true)); },  { passive: false });
+cvs.addEventListener('touchend',   e => { e.preventDefault(); onUp(getPos(e, true)); },    { passive: false });
+cvs.addEventListener('mousedown',  e => onDown(getPos(e, false)));
+cvs.addEventListener('mousemove',  e => onMove(getPos(e, false)));
+cvs.addEventListener('mouseup',    e => onUp(getPos(e, false)));
+
+// ── Game loop ─────────────────────────────────────────────────────
+function loop(ts) {
+    update(ts);
+    draw();
+    requestAnimationFrame(loop);
+}
+
+init();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
