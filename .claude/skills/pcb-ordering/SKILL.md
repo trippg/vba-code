@@ -1,11 +1,11 @@
 ---
-name: jlcpcb-place-order
-description: Place a JLCPCB order in the browser once the board files are ready. Uses Jev (the user's browser-use tool) to upload the Gerber zip, BOM and CPL that the jlcpcb-ordering skill created, fill in the order form, and triple-check every setting and part placement before the user pays. Use when the user says they're ready to order a board from jlcpcb.com.
+name: pcb-ordering
+description: PCB ordering: place a JLCPCB order in the browser once the board files are ready. Uses Jev (the user's browser-use tool) to upload the Gerber zip, BOM and CPL that the pcb-creation skill created, fill in the order form, and triple-check every setting and part placement before the user pays. Use when the user says they're ready to order a board from jlcpcb.com.
 ---
 
-# Place a JLCPCB order with Jev
+# PCB ordering (JLCPCB, with Jev)
 
-The files come from the `jlcpcb-ordering` skill. This skill only uploads them and fills in the form. **The user pays, never Claude.**
+The files come from the `pcb-creation` skill. This skill only uploads them and fills in the form. **The user pays, never Claude.**
 
 ## Before starting
 
@@ -14,7 +14,7 @@ The files come from the `jlcpcb-ordering` skill. This skill only uploads them an
    - the BOM (`…_BOM_JLCPCB.csv`)
    - the CPL (`…_CPL_JLCPCB.csv`)
    - the `HOW TO ORDER` notes for this board
-2. **Re-run the `jlcpcb-ordering` checklist** (its audit script, if the board has one) on exactly these files. Don't continue with any failure.
+2. **Re-run the `pcb-creation` checklist** (its audit script, if the board has one) on exactly these files. Don't continue with any failure.
 3. **Confirm the order details with the user:**
    - board quantity (5 minimum) and how many to assemble
    - PCB colour

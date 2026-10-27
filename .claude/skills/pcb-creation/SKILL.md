@@ -1,9 +1,9 @@
 ---
-name: jlcpcb-ordering
-description: Prepare and check PCB files before ordering from JLCPCB, for bare boards or assembled boards (PCBA). Use when generating or reviewing Gerbers, drill files, BOM or CPL (placement) files for JLCPCB, checking a design against JLCPCB's manufacturing and assembly rules, choosing JLCPCB/LCSC parts, reading JLCPCB's DFM results, or when the user asks how to order from jlcpcb.com.
+name: pcb-creation
+description: PCB creation: make and check PCB files before ordering from JLCPCB, for bare boards or assembled boards (PCBA). Use when generating or reviewing Gerbers, drill files, BOM or CPL (placement) files for JLCPCB, checking a design against JLCPCB's manufacturing and assembly rules, choosing JLCPCB/LCSC parts, reading JLCPCB's DFM results, or when the user asks how to order from jlcpcb.com.
 ---
 
-# JLCPCB ordering
+# PCB creation (JLCPCB)
 
 Built from JLCPCB's help centre (ordering instructions; PCB Files Preparation; PCBA Technical Guidelines; PCB Layout Ordering; DFM Tool Help; capabilities pages; parts library), read Oct 2026. Exact numbers live in the reference files:
 
