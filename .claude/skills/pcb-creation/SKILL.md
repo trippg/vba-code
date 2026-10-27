@@ -1,6 +1,6 @@
 ---
 name: pcb-creation
-description: PCB creation: make and check PCB files before ordering from JLCPCB, for bare boards or assembled boards (PCBA). Use when generating or reviewing Gerbers, drill files, BOM or CPL (placement) files for JLCPCB, checking a design against JLCPCB's manufacturing and assembly rules, choosing JLCPCB/LCSC parts, reading JLCPCB's DFM results, or when the user asks how to order from jlcpcb.com.
+description: PCB creation: make and check PCB files before ordering from JLCPCB, for bare boards or assembled boards (PCBA). Use when generating or reviewing Gerbers, drill files, BOM or CPL (placement) files for JLCPCB, checking a design against JLCPCB's manufacturing and assembly rules, choosing JLCPCB/LCSC parts, reading JLCPCB's DFM results, or when the user asks how to prepare files for jlcpcb.com. For placing the order itself, use pcb-ordering.
 ---
 
 # PCB creation (JLCPCB)
